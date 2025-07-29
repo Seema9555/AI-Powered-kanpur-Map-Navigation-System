@@ -1,0 +1,26 @@
+# chat.py (debugging test)
+import requests
+
+GEMINI_API_KEY = 'AIzaSyD0dD7ecD17Wcrq7LWS7iPOlrhFBfQ49Fo'
+
+def ask_gemini(prompt):
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    response = requests.post(f"{url}?key={GEMINI_API_KEY}", headers=headers, json=data)
+    print("Response:", response.status_code, response.text)  # Print response for debugging
+    if response.status_code == 200:
+        reply = response.json()['candidates'][0]['content']['parts'][0]['text']
+        return reply
+    else:
+        return f"Error: {response.status_code} - {response.text}"
+
+# Test a prompt to verify the response directly
+test_response = ask_gemini("Tell me about Kanpur")
+print(test_response)

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanpur Maps </title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        #map { height: 100vh; }
+        .floating-controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 999;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            font-weight: bold;
+        }
+
+        .controls-content {
+            width: 300px;
+        }
+
+        #chatbox {
+            margin-top: 20px;
+        }
+
+        #chat-output {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background-color: #f1f1f1;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        #chat-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="floating-controls">
+        <div class="controls-content">
+            <h2>Kanpur Maps</h2>
+            <div class="input-group">
+                <label for="source">Source</label>
+                <input list="locations" id="source" placeholder="Enter source" />
+            </div>
+            <div class="input-group">
+                <label for="destination">Destination</label>
+                <input list="locations" id="destination" placeholder="Enter destination" />
+            </div>
+            <button onclick="findPath()">Find Path</button>
+            <button onclick="startVoiceRecognition()">🎤 Speak to Navigate</button>
+            <button onclick="getLocation()">📍 Use My Location</button>
+            <button onclick="startLiveTracking()">📡 Start Live Tracing</button>
+            <div class="input-group">
+                <label for="mode">Transportation Mode</label>
+                <select id="mode">
+                    <option value="driving">Driving</option>
+                    <option value="walking">Walking</option>
+                    <option value="cycling">Cycling</option>
+                </select>
+            </div>
+            
+            <div id="chatbox">
+                <div id="chat-output"></div>
+                <input type="text" id="chat-input" placeholder="Ask something..." />
+                <button onclick="askAI()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <p id="info"></p>
+
+    <datalist id="locations">
+        <option value="Phool Bagh">
+        <option value="Kanpur Central">
+        <option value="Z Square Mall">
+        <option value="Kanpur University">
+        <option value="JK Temple">
+        <option value="Moti Jheel">
+        <option value="Bithoor">
+        <option value="Allen Forest Zoo">
+        <option value="The Mall Road">
+        <option value="Nana Rao Park">
+        <option value="Rave 3 Mall">
+        <option value="Green Park">
+        <option value="Kali Mata Mandir">
+        <option value="Sarai Khas">
+        <option value="Ganga Barrage">
+        <option value="Ghatampur">
+    </datalist>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([26.4499, 80.3319], 13);
+        L.tileLayer('https://api.mapbox.com/styles/v1/mapbox/traffic-day-v2/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoic2F0eWFtMTc3NyIsImEiOiJjbTl1a3F4amgwOTRxMmlzYXQ1bzJpZ2Z5In0.rNoApcAWJuX3rGV8-8w0Jw', {
+            attribution: 'Map data &copy; OpenStreetMap, Imagery © Mapbox',
+            maxZoom: 19
+        }).addTo(map);
+
+        let currentPolyline;
+        let startMarker, endMarker, movingMarker;
+
+        function askAI() {
+            const input = document.getElementById("chat-input").value;
+            if (!input.trim()) return;
+            document.getElementById("chat-output").innerHTML += `<p><b>You:</b> ${input}</p>`;
+            document.getElementById("chat-input").value = "";
+
+            fetch("/ask-ai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: input })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById("chat-output").innerHTML += `<p><b>AI:</b> ${data.answer}</p>`;
+            });
+        }
+
+        function findPath() {
+            const source = document.getElementById('source').value;
+            const destination = document.getElementById('destination').value;
+            const mode = document.getElementById('mode').value;  // Get selected transportation mode
+            document.getElementById("info").innerText = "";
+        
+            if (!source || !destination) {
+                alert("Please provide both source and destination.");
+                return;
+            }
+        
+            fetch('/shortest-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, destination, mode })  // Send mode to server
+            })
+
+
+            
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) return alert(data.error);
+        
+                const latlngs = data.route.map(p => [p[0], p[1]]);
+        
+                if (currentPolyline) map.removeLayer(currentPolyline);
+                if (startMarker) map.removeLayer(startMarker);
+                if (endMarker) map.removeLayer(endMarker);
+                if (movingMarker) map.removeLayer(movingMarker);
+        
+                currentPolyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+                map.fitBounds(latlngs);
+        
+                const startIcon = L.icon({
+                    iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30]
+                });
+        
+                const endIcon = L.icon({
+                    iconUrl: 'https://cdn-icons-png.flaticon.com/512/149/149059.png',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30]
+                });
+        
+                startMarker = L.marker(latlngs[0], { icon: startIcon }).addTo(map).bindPopup("Start");
+                endMarker = L.marker(latlngs[latlngs.length - 1], { icon: endIcon }).addTo(map).bindPopup("Destination");
+        
+                // Calculate time based on mode
+                let speed;
+                if (mode === 'driving') {
+                    speed = 50;  // Approximate speed in km/h for driving
+                } else if (mode === 'walking') {
+                    speed = 5;  // Approximate speed in km/h for walking
+                } else if (mode === 'cycling') {
+                    speed = 15; // Approximate speed in km/h for cycling
+                }
+        
+                const distance = data.distance_km;
+                const eta = (distance / speed) * 60;  // ETA in minutes
+        
+                let infoText = `Distance: ${distance.toFixed(2)} km | ETA: ${eta.toFixed(1)} min (by ${mode})`;
+        
+                // Add more information if available in the response
+                if (data.landmarks) {
+                    infoText += ` | Landmarks: ${data.landmarks.join(', ')}`;
+                }
+        
+                if (data.traffic) {
+                    infoText += ` | Traffic Condition: ${data.traffic}`;
+                }
+        
+                document.getElementById("info").innerText = infoText;
+        
+                animatePath(latlngs);
+            })
+            .catch(err => alert("Something went wrong: " + err));
+        }
+        
+        
+
+        function animatePath(path) {
+            const icon = L.icon({
+                iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
+                iconSize: [30, 30],
+                iconAnchor: [15, 30]
+            });
+
+            let i = 0;
+            movingMarker = L.marker(path[0], { icon }).addTo(map);
+
+            const interval = setInterval(() => {
+                i++;
+                if (i >= path.length) {
+                    clearInterval(interval);
+                    return;
+                }
+                movingMarker.setLatLng(path[i]);
+            }, 400); // speed in ms between points
+        }
+
+        function getLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+
+                    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+                        .then(res => res.json())
+                        .then(data => {
+                            const locationName = data.display_name;
+                            document.getElementById('source').value = locationName;
+                        })
+                        .catch(() => alert("Failed to get location name."));
+                }, () => {
+                    alert("Location permission denied or not available.");
+                });
+            } else {
+                alert("Geolocation is not supported by this browser.");9
+            }
+        }
+
+        
+        let liveMarker;
+        function startLiveTracking() {
+            if (!navigator.geolocation) {
+                alert("Geolocation is not supported by this browser.");
+                return;
+            }
+        
+            navigator.geolocation.watchPosition(
+                position => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+        
+                    const userIcon = L.icon({
+                        iconUrl: "https://cdn-icons-png.flaticon.com/512/1077/1077012.png", // a walking person icon
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 30]
+                    });
+        
+                    if (liveMarker) {
+                        liveMarker.setLatLng([lat, lon]);
+                    } else {
+                        liveMarker = L.marker([lat, lon], { icon: userIcon }).addTo(map).bindPopup("You are here").openPopup();
+                        map.setView([lat, lon], 15); // zoom into your location
+                    }
+                },
+                error => {
+                    alert("Error fetching location: " + error.message);
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 5000
+                }
+            );
+        }
+        
+        function processVoiceCommand(command) {
+            const lower = command.toLowerCase();
+            const pattern = /from\s(.+?)\s(to|go to|navigate to)\s(.+)/i;
+            const match = lower.match(pattern);
+
+            if (match && match.length >= 4) {
+                const source = match[1].trim();
+                const destination = match[3].trim();
+                document.getElementById('source').value = source;
+                document.getElementById('destination').value = destination;
+                findPath();
+            } else {
+                alert("Try: 'Navigate from Phool Bagh to JK Temple'");
+            }
+        }
+
+        if ('webkitSpeechRecognition' in window) {
+            const recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = event => {
+                const result = event.results[0][0].transcript;
+                processVoiceCommand(result);
+            };
+
+            function startVoiceRecognition() {
+                recognition.start();
+            }
+        } else {
+            function startVoiceRecognition() {
+                alert("Speech recognition not supported.");
+            }
+        }
+    </script>
+</body>
+</html>
